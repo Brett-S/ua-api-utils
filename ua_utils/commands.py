@@ -5,6 +5,8 @@ from functools import wraps
 import simplejson as json
 import requests
 
+LIMIT = 5000
+
 logger = logging.getLogger('ua_utils.cli')
 _commands = {}
 
@@ -32,6 +34,9 @@ def jsoncmd(fn):
     return wrap
 
 
+def handle_timeout(fn):
+    def 
+
 def get_command(name):
     """Returns a command handler function or None if command isn't found"""
     return _commands.get(name)
@@ -46,6 +51,67 @@ def api_req(endpoint, auth, params=None):
         r = requests.get(url, auth=auth)
     return r
 
+# def api_req(auth, abs_url=None, endpoint=None, params=None):
+#     """Make API request to UA API"""
+#     if abs_url:
+#         url = abs_url
+#     else:
+#         url = 'https://go.urbanairship.com/api/%s' % endpoint
+#     if params:
+#         if 'limit' in params:
+#             limit = params['limit']
+#             while True:
+#                 try:
+#                     return requests.get(url, params=params, auth=auth)
+#                 except requests.exceptions.Timeout:
+#                     if limit == 1:
+#                         sys.exit('Unable to reach API')
+#                     else:
+#                         limit /= 2
+#     else:
+#         r = requests.get(url, auth=auth)
+#     return r
+
+#Keep api_req func for single reqs like tags?
+
+
+class APIReq(object):
+    def __init__(self, endpoint, auth, params=None):
+        self.url = 'https://go.urbanairship.com/api/%s' % endpoint
+        self.auth = auth
+        self.params = params
+        self.next_page = None
+        if 'limit' in self.params:
+            self.limit = self.params['limit']
+        else:
+            self.limit = None
+
+    def __iter__(self):
+        return self
+
+    def next(self):
+        #req here
+        if self.limit:
+            while self.limit >= 2:
+                try:
+                    self.params['limit'] = self.limit
+                    resp = requests.get(self.url, auth=self.auth,
+                                        params=self.params)
+                    return resp
+                except requests.exceptions.Timeout:
+                    self.limit /= 2
+            sys.exit('Unable to reach API')
+        # This code will probably never be touched but just to be sure:
+        else:
+            attempts = 0
+            while attempts <= 5:
+                try:
+                    resp = requests.get(self.url, auth=self.auth)
+                    return resp
+                except requests.exceptions.Timeout:
+                    attempts += 1
+        return resp
+
 
 @cmd('get-tokens')
 @jsoncmd
@@ -53,7 +119,7 @@ def get_tokens(options):
     """Get all device tokens for an app"""
     logger.info('Retrieving device tokens and saving to %s' % options.outfile)
     auth = (options.app_key, options.secret)
-    resp = api_req('device_tokens/', auth, params={'limit': 5})
+    resp = api_req(auth, endpoint='device_tokens/', params={'limit': LIMIT})
     tokens = {
         'device_tokens_count': resp.json['device_tokens_count'],
         'active_device_tokens_count':
@@ -87,7 +153,7 @@ def get_apids(options):
     """Get all apids for an app"""
     logger.info('Retrieving apids and saving to %s' % options.outfile)
     auth = (options.app_key, options.secret)
-    resp = api_req('apids/', auth, params={'limit': 5})
+    resp = api_req(auth, endpoint='apids/', params={'limit': LIMIT})
     apids = resp.json['apids']
     active_apids = tally_active_devices(resp.json['apids'])
     count = len(apids)
@@ -110,7 +176,7 @@ def get_pins(options):
     """Get all pins for an app"""
     logger.info('Retrieving pins and saving to %s' % options.outfile)
     auth = (options.app_key, options.secret)
-    resp = api_req('device_pins/', auth, params={'limit': 500})
+    resp = api_req(auth, endpoint='device_pins/', params={'limit': LIMIT})
     pins = resp.json['device_pins']
     active_pins = tally_active_devices(resp.json['device_pins'])
     logger.info('Retrieved %d pins' % len(pins))
@@ -139,7 +205,10 @@ def get_users(options):
     auth = (options.app_key, options.secret)
     index = 0
     increment = 10
-    user_req = lambda ind, inc, auth: api_req('users/%d/%d' % (ind, inc), auth)
+
+    def user_req(auth, ind, inc):
+        return api_req(auth, endpoint=('users/%d/%d' % (ind, inc)))
+    #usr_req = lambda ind, inc, auth: api_req('users/%d/%d' % (ind, inc), auth)
     resp = user_req(index, increment, auth)
     new_users = resp.json['users']
     users = new_users
