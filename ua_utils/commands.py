@@ -35,13 +35,24 @@ def jsoncmd(fn):
 
 
 def handle_timeout(fn):
-    def 
+    @wraps(fn)
+    def handle_timeouts(*args, **kwargs):
+        timeout_attempts = 0
+        while timeout_attempts <= 5:
+            try:
+                fn(*args, **kwargs)
+                return handle_timeouts
+            except requests.exceptions.Timeouts:
+                timeout_attempts += 1
+        sys.exit("Unable to reach API")
+
 
 def get_command(name):
     """Returns a command handler function or None if command isn't found"""
     return _commands.get(name)
 
 
+@handle_timeout
 def api_req(endpoint, auth, params=None):
     """Make API request to UA API"""
     url = 'https://go.urbanairship.com/api/%s' % endpoint
@@ -117,28 +128,42 @@ class APIReq(object):
 @jsoncmd
 def get_tokens(options):
     """Get all device tokens for an app"""
+#     logger.info('Retrieving device tokens and saving to %s' %
+#                                                            options.outfile)
+#     auth = (options.app_key, options.secret)
+#     resp = api_req(auth, endpoint='device_tokens/', params={'limit': LIMIT})
+#     tokens = {
+#         'device_tokens_count': resp.json['device_tokens_count'],
+#         'active_device_tokens_count':
+#             resp.json['active_device_tokens_count'],
+#         'device_tokens': resp.json['device_tokens']
+#     }
+#
+#     count = len(tokens['device_tokens'])
+#     total = tokens['device_tokens_count']
+#
+#     while resp.json.get('next_page'):
+#         logger.info('Retrieved %d of %d' % (count, total))
+#         resp = requests.get(resp.json['next_page'],
+#                             auth=auth)
+#         tokens['device_tokens'].extend(resp.json['device_tokens'])
+#         count = len(tokens['device_tokens'])
+#
+#     logger.info('Retrieved %d of %d' % (count, total))
+#     return tokens
     logger.info('Retrieving device tokens and saving to %s' % options.outfile)
     auth = (options.app_key, options.secret)
-    resp = api_req(auth, endpoint='device_tokens/', params={'limit': LIMIT})
+    # endpoint, auth, params
     tokens = {
-        'device_tokens_count': resp.json['device_tokens_count'],
-        'active_device_tokens_count':
-            resp.json['active_device_tokens_count'],
-        'device_tokens': resp.json['device_tokens']
+        'device_tokens_count': [],
+        'active_device_tokens_count': [],
+        'device_tokens': []
     }
-
-    count = len(tokens['device_tokens'])
-    total = tokens['device_tokens_count']
-
-    while resp.json.get('next_page'):
-        logger.info('Retrieved %d of %d' % (count, total))
-        resp = requests.get(resp.json['next_page'],
-                            auth=auth)
+    for resp in APIReq('device_tokens/', auth, params={'limit': LIMIT}):
+        tokens['device_tokens_count'] = resp.json['device_token_count']
+        tokens['active_device_tokens_count'] = resp.json[
+                                                'active_device_tokens_count']
         tokens['device_tokens'].extend(resp.json['device_tokens'])
-        count = len(tokens['device_tokens'])
-
-    logger.info('Retrieved %d of %d' % (count, total))
-    return tokens
 
 
 def tally_active_devices(device_json):
@@ -205,10 +230,7 @@ def get_users(options):
     auth = (options.app_key, options.secret)
     index = 0
     increment = 10
-
-    def user_req(auth, ind, inc):
-        return api_req(auth, endpoint=('users/%d/%d' % (ind, inc)))
-    #usr_req = lambda ind, inc, auth: api_req('users/%d/%d' % (ind, inc), auth)
+    user_req = lambda ind, inc, auth: api_req('users/%d/%d' % (ind, inc), auth)
     resp = user_req(index, increment, auth)
     new_users = resp.json['users']
     users = new_users
